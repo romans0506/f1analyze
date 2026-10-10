@@ -4,15 +4,41 @@ Interactive Formula 1 analytics for every Grand Prix since 1950, plus a
 supervised-learning model that predicts the next race with win / podium /
 points probabilities.
 
-## Pages
+## Two modes
+
+Switch between them at the top of the sidebar. The choice is kept in the URL,
+so `?mode=expert` or `?mode=simple` links open in that mode.
+
+### 🟢 Simple: for everyone
 
 | Page | What it shows |
 |---|---|
-| **Next GP prediction** | Win, podium and points probability per driver, predicted finishing order with an 80% range, the full finishing-position distribution, the features behind each prediction, and the history of the circuit. Updates to use the real grid as soon as qualifying is done. |
-| **Season overview** | Drivers' and constructors' standings, points progression, a results grid of every round, and team points per round, for any season. |
-| **Grand Prix analysis** | Results and grid→finish changes for any race. From 2018 onwards it also shows lap-by-lap positions, race pace, tyre strategy, gaps to the leader, a telemetry comparison of two drivers' fastest laps, and qualifying gaps. |
-| **Driver head-to-head** | Any two drivers, over a season or their whole careers: qualifying and race head-to-head, results over time, and who is stronger at which circuits. |
-| **Model accuracy** | A walk-forward backtest that compares the model with the "grid order = finishing order" baseline. |
+| **Race weekend** | A live countdown to lights out, the predicted podium, "pick your driver" with their chances in plain words ("about 1 in 4"), the track map with corner numbers, and track facts. |
+| **Race replay** | The race from above: every car moves round the track in team colours, with a live running order, gaps, tyres, pit stops, safety cars and flags. You can play, pause, change the speed, scrub, jump to a lap, and click a driver to follow them. |
+| **Last race recap** | The race told as a short story: winner, biggest climber, retirements, and the championship swing. Also shows the podium, places gained or lost, and the full result. |
+| **Championship** | The podium, who can still mathematically win the title, an animated race-by-race standings chart, and the team standings. |
+
+### 🔬 Expert: every stat
+
+| Page | What it shows |
+|---|---|
+| **Next GP prediction** | Win, podium and points probabilities, the predicted order with an 80% range, the finishing-position distribution, the features behind each prediction, and circuit history. |
+| **Season overview** | Standings, points progression, a results grid of every round, and team points per round, for any season since 1950. |
+| **Grand Prix analysis** | Results, lap-by-lap positions, race pace, tyre strategy, **tyre degradation** (fuel-corrected seconds lost per lap, per compound and per stint), gaps to the leader, fastest-lap telemetry comparison and qualifying. |
+| **Race replay** | The same player as in Simple mode. |
+| **Driver head-to-head** | Any two drivers over a season or their careers. |
+| **Model accuracy** | A walk-forward backtest against the "grid order" baseline. |
+
+### About the replay
+
+The replay uses the official position feed (about 4 Hz), resampled to one
+frame per second and smoothed in the browser. The running order comes from
+each car's distance round the lap, so it updates mid-lap rather than only at
+the timing line. It handles cars starting from the pit lane, and once each car
+takes the flag it switches to the official classification, including
+penalties. Data for a new race is available about an hour after the chequered
+flag. True *live* positions during a session would need an F1 TV subscription
+or a paid OpenF1 account, so they aren't included.
 
 ## Run it
 

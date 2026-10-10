@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import fastf1
+import numpy as np
 import pandas as pd
 
 from .data import ROOT
 
 FASTF1_FROM = 2018
+FUEL_EFFECT = 0.035  # typical lap-time gain per lap from burning fuel (s)
+DRY_AND_WET = {"SOFT", "MEDIUM", "HARD", "INTERMEDIATE", "WET"}
 CACHE = ROOT / ".fastf1_cache"
 CACHE.mkdir(exist_ok=True)
 fastf1.Cache.enable_cache(str(CACHE))
@@ -50,3 +53,28 @@ def fastest_lap_telemetry(session, driver: str) -> pd.DataFrame:
     tel["Driver"] = driver
     tel["LapTime"] = lap.LapTime.total_seconds()
     return tel[["Driver", "Distance", "Speed", "Throttle", "Brake", "nGear", "RPM", "LapTime"]]
+
+
+def degradation(clean: pd.DataFrame, fuel_effect: float = FUEL_EFFECT, min_laps: int = 6) -> dict:
+    """Tyre wear from clean race laps. Lap times are fuel-corrected (later laps
+    are flattered by a lighter car), then a straight line is fitted against
+    tyre age per compound and per stint."""
+    laps = clean.dropna(subset=["TyreLife", "Compound", "Stint"])
+    laps = laps[laps.Compound.isin(DRY_AND_WET)].copy()
+    laps["Corrected"] = laps.LapSeconds + fuel_effect * (laps.LapNumber - 1)
+
+    compound_fit = {}
+    for comp, g in laps.groupby("Compound"):
+        if len(g) >= 10 and g.TyreLife.nunique() > 3:
+            slope, icept = np.polyfit(g.TyreLife, g.Corrected, 1)
+            xs = np.array([g.TyreLife.min(), g.TyreLife.max()])
+            compound_fit[comp] = {"slope": slope, "x": xs, "y": icept + slope * xs}
+
+    rows = []
+    for (drv, stint, comp), g in laps.groupby(["Driver", "Stint", "Compound"]):
+        if len(g) >= min_laps:
+            slope = np.polyfit(g.TyreLife, g.Corrected, 1)[0]
+            rows.append({"Driver": drv, "Stint": int(stint), "Compound": comp, "laps": len(g),
+                         "deg_per_lap": slope, "avg_pace": g.LapSeconds.mean(),
+                         "label": f"{drv} · stint {int(stint)}"})
+    return {"laps": laps, "compound_fit": compound_fit, "stints": pd.DataFrame(rows)}

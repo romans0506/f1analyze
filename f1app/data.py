@@ -67,9 +67,10 @@ def _load_csv_dump() -> F1Data:
 
     races = _csv("races").merge(circuits, on="circuitId", how="left")
     races["date"] = pd.to_datetime(races.date)
+    races["start_utc"] = pd.to_datetime(races.date.dt.strftime("%Y-%m-%d") + " " + races.time.fillna("12:00:00"), utc=True)
     races["quali_date"] = pd.to_datetime(races.quali_date, errors="coerce")
     races["has_sprint"] = races.sprint_date.notna()
-    races = races[["raceId", "year", "round", "name", "date", "quali_date", "has_sprint",
+    races = races[["raceId", "year", "round", "name", "date", "start_utc", "quali_date", "has_sprint",
                    "circuitRef", "circuit", "location", "country", "lat", "lng"]]
 
     def expand(df: pd.DataFrame) -> pd.DataFrame:
@@ -157,6 +158,8 @@ def _schedule_rows(year: int, races: pd.DataFrame) -> pd.DataFrame:
         rows.append({
             "raceId": race_id, "year": year, "round": rnd, "name": r["raceName"],
             "date": pd.Timestamp(r["date"]),
+            "start_utc": pd.Timestamp(f"{r['date']} {r.get('time', '12:00:00Z')}").tz_convert("UTC")
+                         if r.get("time") else pd.Timestamp(f"{r['date']} 12:00:00", tz="UTC"),
             "quali_date": pd.Timestamp(r["Qualifying"]["date"]) if "Qualifying" in r else pd.NaT,
             "has_sprint": "Sprint" in r,
             "circuitRef": c["circuitId"], "circuit": c["circuitName"], "location": loc.get("locality"),

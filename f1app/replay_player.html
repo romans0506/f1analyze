@@ -1,0 +1,243 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  :root {
+    --bg: #15151e; --panel: #1f1f2b; --line: #2e2e3d; --text: #f4f4f6; --muted: #9a9aab;
+    --accent: #e10600; --yellow: #ffd12e; --sc: #ff8c00; --red: #e10600; --green: #2ecc71;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.35 "Titillium Web", system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .wrap { display: grid; grid-template-columns: minmax(0, 1fr) 270px; gap: 10px; padding: 10px; }
+  @media (max-width: 760px) { .wrap { grid-template-columns: minmax(0, 1fr); } .board { max-height: 420px; } }
+  .stage { position: relative; background: var(--panel); border-radius: 12px; overflow: hidden; min-height: 320px; }
+  canvas { display: block; width: 100%; height: 100%; }
+  .hud { position: absolute; top: 10px; left: 12px; right: 12px; display: flex; gap: 8px; align-items: center;
+         pointer-events: none; flex-wrap: wrap; }
+  .pill { background: rgba(0,0,0,.55); padding: 4px 10px; border-radius: 999px; font-weight: 700; letter-spacing: .3px; }
+  .lap { font-size: 18px; }
+  .flag { display: none; }
+  .flag.show { display: inline-block; }
+  .flag.yellow { background: var(--yellow); color: #111; }
+  .flag.sc, .flag.vsc, .flag.vsc_ending { background: var(--sc); color: #111; }
+  .flag.red { background: var(--red); color: #fff; }
+  .board { background: var(--panel); border-radius: 12px; padding: 8px; max-height: 640px; overflow-y: auto; }
+  .board h3 { margin: 2px 6px 8px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+  .row { display: grid; grid-template-columns: 22px 5px 44px 1fr 22px; gap: 6px; align-items: center;
+         padding: 4px 6px; border-radius: 6px; cursor: pointer; transition: background .15s; }
+  .row:hover { background: #2a2a38; }
+  .row.followed { background: #34344a; outline: 1px solid #55557a; }
+  .row.out { opacity: .4; }
+  .pos { text-align: right; font-weight: 700; color: var(--muted); }
+  .bar { width: 5px; height: 18px; border-radius: 2px; }
+  .code { font-weight: 700; }
+  .gap { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; font-size: 13px; }
+  .tyre { width: 20px; height: 20px; border-radius: 50%; border: 3px solid; background: #111;
+          font-size: 11px; line-height: 1; display: grid; place-items: center; font-weight: 800; }
+  .badge { font-size: 11px; font-weight: 700; padding: 1px 5px; border-radius: 4px; background: #fff; color: #111; }
+  .controls { grid-column: 1 / -1; display: flex; gap: 10px; align-items: center; background: var(--panel);
+              border-radius: 12px; padding: 8px 12px; flex-wrap: wrap; }
+  button, select { background: #2a2a38; color: var(--text); border: 1px solid var(--line); border-radius: 8px;
+                   padding: 6px 12px; font: inherit; cursor: pointer; }
+  button.play { background: var(--accent); border-color: var(--accent); font-weight: 700; min-width: 86px; }
+  input[type=range] { flex: 1 1 160px; min-width: 0; accent-color: var(--accent); }
+  .clock { font-variant-numeric: tabular-nums; color: var(--muted); min-width: 64px; text-align: right; }
+  .hint { color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="stage" id="stage">
+    <canvas id="c"></canvas>
+    <div class="hud">
+      <span class="pill lap" id="lap">LAP 1 / 1</span>
+      <span class="pill flag" id="flag"></span>
+      <span class="pill" id="follow" style="display:none"></span>
+    </div>
+  </div>
+  <div class="board">
+    <h3>Running order <span class="hint">· click to follow</span></h3>
+    <div id="rows"></div>
+  </div>
+  <div class="controls">
+    <button class="play" id="play">▶ Play</button>
+    <select id="speed" title="Playback speed">
+      <option value="1">1×</option><option value="4">4×</option><option value="10" selected>10×</option>
+      <option value="30">30×</option><option value="60">60×</option>
+    </select>
+    <input type="range" id="scrub" min="0" value="0" step="1">
+    <span class="clock" id="clock">0:00</span>
+    <select id="jump" title="Jump to lap"></select>
+  </div>
+</div>
+<script>
+const R = __REPLAY_DATA__;
+const N = R.frames, D = R.drivers;
+const FLAG_TEXT = {yellow: "YELLOW FLAG", sc: "SAFETY CAR", vsc: "VIRTUAL SAFETY CAR", vsc_ending: "VSC ENDING", red: "RED FLAG"};
+const TYRE = {SOFT: ["#da291c","S"], MEDIUM: ["#ffd12e","M"], HARD: ["#f0f0ec","H"],
+              INTERMEDIATE: ["#43b02a","I"], WET: ["#0067ad","W"]};
+
+const canvas = document.getElementById("c"), ctx = canvas.getContext("2d");
+const stage = document.getElementById("stage");
+let t = 0, playing = false, follow = null, last = null;
+
+// ---- geometry
+const xs = R.track.map(p => p[0]), ys = R.track.map(p => p[1]);
+const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+let scale = 1, ox = 0, oy = 0, W = 0, H = 0;
+function layout() {
+  const w = stage.clientWidth, h = w < 600 ? Math.max(240, w * 0.8) : Math.max(320, Math.min(640, w * 0.68));
+  stage.style.height = h + "px";
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = w * dpr; canvas.height = h * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  W = w; H = h;
+  const pad = 46;
+  scale = Math.min((w - 2 * pad) / (maxX - minX), (h - 2 * pad - 30) / (maxY - minY));
+  ox = (w - (maxX - minX) * scale) / 2; oy = 30 + (h - 30 - (maxY - minY) * scale) / 2;
+}
+const sx = x => ox + (x - minX) * scale;
+const sy = y => oy + (maxY - y) * scale;   // flip: y up on the map
+
+// ---- helpers
+function stepAt(changes, f) {           // [[frame, value], ...] -> value at frame f
+  let v = changes[0][1];
+  for (const [k, val] of changes) { if (k <= f) v = val; else break; }
+  return v;
+}
+function fmtClock(s) { const m = Math.floor(s / 60), ss = Math.floor(s % 60); return `${m}:${String(ss).padStart(2, "0")}`; }
+function lerp(a, b, u) { return a == null ? b : b == null ? a : a + (b - a) * u; }
+
+// ---- drawing
+function drawTrack() {
+  ctx.lineJoin = "round"; ctx.lineCap = "round";
+  ctx.beginPath();
+  R.track.forEach(([x, y], i) => i ? ctx.lineTo(sx(x), sy(y)) : ctx.moveTo(sx(x), sy(y)));
+  ctx.closePath();
+  ctx.strokeStyle = "#3a3a4c"; ctx.lineWidth = 14; ctx.stroke();
+  ctx.strokeStyle = "#8b8ba0"; ctx.lineWidth = 2; ctx.stroke();
+  // start / finish
+  const [x0, y0] = R.track[0], [x1, y1] = R.track[3];
+  const ang = Math.atan2(sy(y1) - sy(y0), sx(x1) - sx(x0)) + Math.PI / 2;
+  ctx.strokeStyle = "#fff"; ctx.lineWidth = 3; ctx.beginPath();
+  ctx.moveTo(sx(x0) + Math.cos(ang) * 10, sy(y0) + Math.sin(ang) * 10);
+  ctx.lineTo(sx(x0) - Math.cos(ang) * 10, sy(y0) - Math.sin(ang) * 10); ctx.stroke();
+  ctx.fillStyle = "#6f6f85"; ctx.font = "11px system-ui"; ctx.textAlign = "center";
+  for (const c of R.corners) ctx.fillText(c.n, sx(c.x), sy(c.y) - 12);
+}
+
+function render() {
+  const f = Math.min(Math.floor(t), N - 1), u = t - f, g = Math.min(f + 1, N - 1);
+  ctx.clearRect(0, 0, W, H);
+  drawTrack();
+
+  const order = R.order[f];
+  const rank = {}; order.forEach((di, r) => rank[di] = r);
+  const pos = {};
+  for (const di of order) {
+    const d = D[di], x = lerp(d.x[f], d.x[g], u), y = lerp(d.y[f], d.y[g], u);
+    if (x != null && y != null) pos[di] = [sx(x), sy(y)];
+  }
+  // Dots: back-markers first so the leaders sit on top.
+  for (const di of [...order].reverse()) {
+    if (!pos[di]) continue;
+    const [px, py] = pos[di], big = follow === di;
+    ctx.beginPath(); ctx.arc(px, py, big ? 9 : 6.5, 0, 2 * Math.PI);
+    ctx.fillStyle = D[di].color; ctx.fill();
+    ctx.lineWidth = big ? 3 : 1.5; ctx.strokeStyle = big ? "#fff" : "#111"; ctx.stroke();
+  }
+  // Labels: followed driver first, then race order; skip any that would overlap.
+  const placed = [];
+  const labelOrder = follow !== null ? [follow, ...order.filter(di => di !== follow)] : order;
+  for (const di of labelOrder) {
+    if (!pos[di]) continue;
+    if (follow !== null && di !== follow && rank[di] >= 3) continue;
+    const big = follow === di, [px, py] = pos[di];
+    ctx.font = `bold ${big ? 13 : 11}px system-ui`;
+    const w = ctx.measureText(D[di].code).width, box = [px + 9, py - 18, px + 9 + w, py - 4];
+    if (placed.some(o => box[0] < o[2] && box[2] > o[0] && box[1] < o[3] && box[3] > o[1])) continue;
+    placed.push(box);
+    ctx.textAlign = "left"; ctx.fillStyle = "#fff"; ctx.fillText(D[di].code, box[0], py - 7);
+  }
+
+  // HUD
+  document.getElementById("lap").textContent = `LAP ${R.lap[f]} / ${R.total_laps}`;
+  const flag = stepAt(R.flags, f), fl = document.getElementById("flag");
+  fl.className = "pill flag" + (flag !== "green" ? " show " + flag : "");
+  fl.textContent = FLAG_TEXT[flag] || "";
+  document.getElementById("clock").textContent = fmtClock(f * R.frame_seconds);
+  document.getElementById("scrub").value = f;
+  renderBoard(f, order);
+}
+
+// ---- leaderboard
+const rowsEl = document.getElementById("rows");
+const rowEls = D.map((d, di) => {
+  const el = document.createElement("div");
+  el.className = "row";
+  el.innerHTML = `<span class="pos"></span><span class="bar" style="background:${d.color}"></span>
+    <span class="code" title="${d.name} · ${d.team}">${d.code}</span><span class="gap"></span><span class="tyre"></span>`;
+  el.onclick = () => { follow = follow === di ? null : di; updateFollow(); render(); };
+  return el;
+});
+function renderBoard(f, order) {
+  order.forEach((di, r) => {
+    const d = D[di], el = rowEls[di];
+    if (rowsEl.children[r] !== el) rowsEl.insertBefore(el, rowsEl.children[r] || null);
+    const out = d.out_from !== null && f >= d.out_from;
+    el.classList.toggle("out", out);
+    el.classList.toggle("followed", follow === di);
+    el.children[0].textContent = r + 1;
+    const gapEl = el.children[3];
+    const flagged = d.finish_from !== null && f >= d.finish_from;
+    if (out) gapEl.innerHTML = `<span class="badge" style="background:#555;color:#ddd">OUT</span>`;
+    else if (flagged) gapEl.textContent = "🏁 " + (r === 0 ? "Winner" : d.official_gap != null ? `+${d.official_gap.toFixed(1)}` : d.status);
+    else if (d.pit[f]) gapEl.innerHTML = `<span class="badge">PIT</span>`;
+    else if (r === 0) gapEl.textContent = "Leader";
+    else gapEl.textContent = d.gap[f] == null ? "" : `+${d.gap[f].toFixed(1)}`;
+    const comp = stepAt(d.tyres, f), ty = el.children[4];
+    ty.style.visibility = TYRE[comp] ? "visible" : "hidden";
+    if (TYRE[comp]) { const [col, letter] = TYRE[comp]; ty.style.borderColor = col; ty.textContent = letter; ty.style.color = col; }
+  });
+}
+function updateFollow() {
+  const el = document.getElementById("follow");
+  if (follow === null) { el.style.display = "none"; return; }
+  el.style.display = "inline-block"; el.style.background = D[follow].color;
+  el.textContent = `Following ${D[follow].name}`;
+}
+
+// ---- controls
+const playBtn = document.getElementById("play"), speedSel = document.getElementById("speed");
+const scrub = document.getElementById("scrub"), jump = document.getElementById("jump");
+scrub.max = N - 1;
+jump.innerHTML = `<option value="">Jump to lap…</option>` +
+  Array.from({length: R.total_laps}, (_, i) => `<option value="${i + 1}">Lap ${i + 1}</option>`).join("");
+playBtn.onclick = () => { playing = !playing; playBtn.textContent = playing ? "❚❚ Pause" : "▶ Play"; last = null; };
+scrub.oninput = () => { t = +scrub.value; render(); };
+jump.onchange = () => {
+  const L = +jump.value; if (!L) return;
+  const k = R.lap.findIndex(l => l >= L); if (k >= 0) { t = k; render(); }
+  jump.value = "";
+};
+document.addEventListener("keydown", e => {
+  if (e.code === "Space") { e.preventDefault(); playBtn.click(); }
+  if (e.code === "ArrowRight") { t = Math.min(N - 1, t + 10); render(); }
+  if (e.code === "ArrowLeft") { t = Math.max(0, t - 10); render(); }
+});
+
+function tick(now) {
+  if (playing) {
+    if (last !== null) t += (now - last) / 1000 / R.frame_seconds * +speedSel.value;
+    last = now;
+    if (t >= N - 1) { t = N - 1; playing = false; playBtn.textContent = "▶ Play"; }
+    render();
+  }
+  requestAnimationFrame(tick);
+}
+window.addEventListener("resize", () => { layout(); render(); });
+layout(); render(); requestAnimationFrame(tick);
+</script>
+</body>
+</html>

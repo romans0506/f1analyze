@@ -25,17 +25,17 @@ winner = res.iloc[0]
 pole = res[res.grid == 1]
 
 c1, c2, c3, c4 = st.columns(4)
-c1.metric("Winner", winner.driver, winner.team, delta_color="off")
-c2.metric("Pole", pole.iloc[0].driver if len(pole) else "—",
+c1.metric("Winner", winner.driver.split()[-1], winner.team, delta_color="off")
+c2.metric("Pole", pole.iloc[0].driver.split()[-1] if len(pole) else "—",
           f"finished P{pole.iloc[0].positionOrder}" if len(pole) else None, delta_color="off")
 best = res.loc[res.gained.idxmax()] if res.gained.notna().any() else None
-c3.metric("Biggest climber", best.driver if best is not None else "—",
+c3.metric("Biggest climber", best.driver.split()[-1] if best is not None else "—",
           f"+{best.gained:.0f} places" if best is not None else None)
 c4.metric("Finishers", f"{int(res.finished.sum())} / {len(res)}")
 
 # ------------------------------------------------------------- results
-tab_res, tab_pos, tab_pace, tab_tyre, tab_gap, tab_tel, tab_q = st.tabs(
-    ["Results", "Positions", "Race pace", "Tyre strategy", "Gaps", "Telemetry", "Qualifying"])
+tab_res, tab_pos, tab_pace, tab_tyre, tab_deg, tab_gap, tab_tel, tab_q = st.tabs(
+    ["Results", "Positions", "Race pace", "Tyre strategy", "Tyre degradation", "Gaps", "Telemetry", "Qualifying"])
 
 with tab_res:
     left, right = st.columns([3, 2])
@@ -136,6 +136,38 @@ with tab_tyre:
         stops = stints.groupby("Driver").Stint.max().sub(1).reindex(order).rename("Pit stops")
         st.markdown("**Stops per driver**")
         st.bar_chart(stops)
+
+with tab_deg:
+    if session is None:
+        st.info(needs_timing)
+    else:
+        fuel = st.slider("Fuel correction (s gained per lap as fuel burns)", 0.0, 0.08, sessions.FUEL_EFFECT, 0.005,
+                         help="Cars get lighter, and so faster, as they burn fuel. Adding that back isolates tyre wear.")
+        deg = sessions.degradation(sessions.race_pace(laps), fuel)
+        if deg["laps"].empty:
+            st.info("Not enough clean laps to measure degradation.")
+        else:
+            st.caption("Fuel-corrected lap time against tyre age. The slope of each line is how much time that "
+                       "compound lost per lap of wear (positive = slower as the tyre ages).")
+            dl = deg["laps"]
+            fig = px.scatter(dl, x="TyreLife", y="Corrected", color="Compound", color_discrete_map=COMPOUND_COLORS,
+                             opacity=0.35, hover_data=["Driver", "LapNumber"],
+                             labels={"TyreLife": "Tyre age (laps)", "Corrected": "Fuel-corrected lap time (s)"})
+            for comp, fit in deg["compound_fit"].items():
+                fig.add_scatter(x=fit["x"], y=fit["y"], mode="lines", name=f"{comp} trend ({fit['slope']:+.3f} s/lap)",
+                                line=dict(color=COMPOUND_COLORS.get(comp, "#888"), width=4))
+            st.plotly_chart(style(fig, 480), width="stretch")
+
+            st.markdown("**Degradation per stint** (stints of 6+ clean laps)")
+            if deg["stints"].empty:
+                st.info("No stint had enough clean laps (common in wet or safety-car-heavy races).")
+            else:
+                stints_deg = deg["stints"].sort_values("deg_per_lap")
+                fig = px.bar(stints_deg, x="deg_per_lap", y="label", orientation="h", color="Compound",
+                             color_discrete_map=COMPOUND_COLORS, hover_data=["laps", "avg_pace"],
+                             labels={"deg_per_lap": "Seconds lost per lap of tyre age", "label": ""})
+                fig.update_yaxes(categoryorder="array", categoryarray=stints_deg.label.tolist())
+                st.plotly_chart(style(fig, max(320, 22 * len(stints_deg))), width="stretch")
 
 with tab_gap:
     if session is None:

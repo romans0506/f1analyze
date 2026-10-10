@@ -58,7 +58,7 @@ def train(feats: pd.DataFrame, use_grid: bool, before: pd.Timestamp | None = Non
 
     # Race-day noise grows down the order (the front is more predictable than
     # the midfield): fit |residual| against the prediction on the last two
-    # seasons. Residuals are in-sample, so scale up to stay honest — 1.25 was
+    # seasons. Residuals are in-sample, so scale up to stay honest â€” 1.25 was
     # the best-calibrated factor in the 2025-26 walk-forward backtest.
     recent = finishers[finishers.year >= finishers.year.max() - 1]
     pred = reg.predict(recent[cols])
@@ -90,6 +90,10 @@ def simulate(model: RaceModel, field: pd.DataFrame, n: int = N_SIMULATIONS, seed
     out["expected_pos"] = finish.mean(axis=0)
     out["pos_p10"] = np.percentile(finish, 10, axis=0)
     out["pos_p90"] = np.percentile(finish, 90, axis=0)
+    # The same range counting only races the driver finishes.
+    finished_only = np.where(retired, np.nan, finish)
+    out["fin_p10"] = np.nanpercentile(finished_only, 10, axis=0)
+    out["fin_p90"] = np.nanpercentile(finished_only, 90, axis=0)
     # Full finishing-position distribution, for the heatmap.
     dist = np.stack([(finish == p).mean(axis=0) for p in range(1, k + 1)], axis=1)
     out["position_dist"] = list(dist)

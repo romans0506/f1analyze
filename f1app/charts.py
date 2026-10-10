@@ -11,7 +11,7 @@ TEAM_COLORS = {
     "force_india": "#F596C8", "renault": "#FFF500", "lotus_f1": "#FFB800",
 }
 COMPOUND_COLORS = {
-    "SOFT": "#DA291C", "MEDIUM": "#FFD12E", "HARD": "#F0F0EC", "INTERMEDIATE": "#43B02A",
+    "SOFT": "#DA291C", "MEDIUM": "#FFD12E", "HARD": "#B8B8B8", "INTERMEDIATE": "#43B02A",
     "WET": "#0067AD", "UNKNOWN": "#888888", "TEST_UNKNOWN": "#888888",
 }
 _FALLBACK = px.colors.qualitative.Bold

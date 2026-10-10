@@ -5,7 +5,7 @@ import pandas as pd
 import streamlit as st
 
 from f1app.data import F1Data, load_data
-from f1app import model, sessions
+from f1app import model, replay, sessions
 
 
 @st.cache_resource(ttl="6h", show_spinner="Loading results database…")
@@ -38,3 +38,17 @@ def race_picker(data: F1Data, year: int, key: str) -> pd.Series:
     labels = {r.raceId: f"R{r.round} · {r.name}" for r in races.itertuples()}
     race_id = st.sidebar.selectbox("Grand Prix", list(labels), format_func=labels.get, key=key)
     return races.set_index("raceId").loc[race_id].rename(race_id)
+
+
+@st.cache_data(max_entries=8, show_spinner="Building the race replay (first time per race takes about a minute)…")
+def get_replay(year: int, rnd: int) -> dict:
+    return replay.build_replay(sessions.load_session(year, rnd, "R", telemetry=True))
+
+
+@st.cache_data(max_entries=32, show_spinner="Drawing the track…")
+def get_track_map(year: int, rnd: int) -> dict:
+    return replay.track_map(sessions.load_session(year, rnd, "Q", telemetry=True))
+
+
+def is_simple() -> bool:
+    return st.session_state.get("mode", "simple") == "simple"
